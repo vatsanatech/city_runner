@@ -60,6 +60,7 @@ internal class CityRunnerRuntime : PlatformViewFactory(StandardMessageCodec.INST
             .put("packs", JSONArray(packs.map { it.path })).toString()
         pending = result
         if (layout != null) {
+            engine?.enableImmersiveMode(true)
             resume()
             bridge?.open()
         }
