@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'city_downloads.dart';
 
@@ -19,8 +20,10 @@ class CityRunnerScreen extends StatefulWidget {
     required this.onExit,
     this.beforeNativeLaunch,
     this.afterNativeExit,
+    this.onEvent,
   });
 
+  final void Function(String name, Map<String, dynamic> properties)? onEvent;
   final Uri manifest;
   final VoidCallback onExit;
   final Future<void> Function()? beforeNativeLaunch, afterNativeExit;
@@ -45,10 +48,32 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    NativeRunner.channel.setMethodCallHandler((call) async {
+      if (call.method == 'gameEvent' && _playing && mounted) {
+        final event = Map<String, dynamic>.from(call.arguments as Map);
+        _event(event.remove('name') as String, event);
+      }
+    });
     _load();
   }
 
+  void _event(String name, [Map<String, dynamic> properties = const {}]) {
+    try {
+      widget.onEvent?.call(name, Map.unmodifiable(properties));
+    } catch (_) {
+      // Host analytics must never interrupt downloads or gameplay.
+    }
+  }
+
+  String _code(Object error) => switch (error) {
+    DownloadCancelled() => 'cancelled',
+    PlatformException() => 'native_error',
+    FormatException() => 'invalid_content',
+    _ => 'unavailable',
+  };
+
   Future<void> _load() async {
+    final clock = Stopwatch()..start();
     setState(() {
       _loading = true;
       _error = null;
@@ -65,12 +90,22 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
         store.dispose();
         return;
       }
+      _event('catalogue_result', {
+        'result_state': 'success',
+        'duration_ms': clock.elapsedMilliseconds,
+        'error_code': 'none',
+      });
       _downloads?.dispose();
       setState(() {
         _downloads = store;
         _loading = false;
       });
     } catch (error) {
+      _event('catalogue_result', {
+        'result_state': 'failure',
+        'duration_ms': clock.elapsedMilliseconds,
+        'error_code': _code(error),
+      });
       if (mounted) {
         setState(() {
           _error = '$error';
@@ -80,14 +115,23 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
     }
   }
 
-  Future<void> _select(RunnerCity city) async {
+  Future<void> _select(RunnerCity city, {bool track = true}) async {
     setState(() {
       _selected = city;
       _bytes = null;
       _error = null;
     });
     final bytes = await _downloads!.downloadBytes(city);
-    if (mounted && _selected == city) setState(() => _bytes = bytes);
+    if (mounted && _selected == city) {
+      setState(() => _bytes = bytes);
+      if (track) {
+        _event('city_selected', {
+          'city_id': city.id,
+          'download_bytes': bytes,
+          'cache_hit': bytes == 0,
+        });
+      }
+    }
   }
 
   Future<void> _play() async {
@@ -98,13 +142,35 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
       _error = null;
       _progress = 0;
     });
+    final clock = Stopwatch()..start();
+    final bytes = _bytes ?? 0;
+    final download = {
+      'city_id': city.id,
+      'download_bytes': bytes,
+      'cache_hit': bytes == 0,
+    };
+    var installed = false;
+    var launching = false;
+    _event('download_requested', download);
     try {
       final files = await _downloads!.install(city, (received, total) {
         if (mounted) setState(() => _progress = received / total);
       });
+      installed = true;
+      _event('download_result', {
+        ...download,
+        'result_state': 'success',
+        'duration_ms': clock.elapsedMilliseconds,
+        'error_code': 'none',
+      });
       if (!mounted || _cancelRequested) return;
+      launching = true;
+      _event('launch_requested', {'city_id': city.id});
       await widget.beforeNativeLaunch?.call();
-      if (!mounted || _cancelRequested) return;
+      if (!mounted || _cancelRequested) {
+        _event('launch_cancelled');
+        return;
+      }
       setState(() => _playing = true);
       try {
         await _native.launch(city.id, files);
@@ -112,10 +178,27 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
         if (mounted) setState(() => _playing = false);
         await widget.afterNativeExit?.call();
       }
-      if (mounted) await _select(city);
-    } on DownloadCancelled {
-      if (mounted) await _select(city);
+      _event('native_closed');
+      if (mounted) await _select(city, track: false);
+    } on DownloadCancelled catch (error) {
+      _event('download_result', {
+        ...download,
+        'result_state': 'cancelled',
+        'duration_ms': clock.elapsedMilliseconds,
+        'error_code': _code(error),
+      });
+      if (mounted) await _select(city, track: false);
     } catch (error) {
+      if (!installed) {
+        _event('download_result', {
+          ...download,
+          'result_state': 'failure',
+          'duration_ms': clock.elapsedMilliseconds,
+          'error_code': _code(error),
+        });
+      } else if (launching) {
+        _event('native_error', {'error_code': _code(error)});
+      }
       if (mounted) setState(() => _error = '$error');
     } finally {
       if (mounted) setState(() => _working = false);
@@ -123,11 +206,25 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
   }
 
   Future<void> _remove() async {
+    final clock = Stopwatch()..start();
+    final city = _selected!;
     setState(() => _working = true);
     try {
       await _downloads!.remove(_selected!);
-      if (mounted) await _select(_selected!);
+      _event('cache_remove_result', {
+        'city_id': city.id,
+        'result_state': 'success',
+        'duration_ms': clock.elapsedMilliseconds,
+        'error_code': 'none',
+      });
+      if (mounted) await _select(city, track: false);
     } catch (error) {
+      _event('cache_remove_result', {
+        'city_id': city.id,
+        'result_state': 'failure',
+        'duration_ms': clock.elapsedMilliseconds,
+        'error_code': _code(error),
+      });
       if (mounted) setState(() => _error = '$error');
     } finally {
       if (mounted) setState(() => _working = false);
@@ -149,6 +246,8 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    NativeRunner.channel.setMethodCallHandler(null);
+    _event('chooser_closed');
     _cancelRequested = true;
     _downloads?.dispose();
     super.dispose();

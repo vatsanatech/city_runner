@@ -24,6 +24,9 @@ class CityRunnerPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallH
         context = binding.applicationContext
         channel = MethodChannel(binding.binaryMessenger, "in.stage.cityrunner")
         channel.setMethodCallHandler(this)
+        runtime.onEvent = { name, payload ->
+            main.post { channel.invokeMethod("gameEvent", payload + ("name" to name)) }
+        }
         binding.platformViewRegistry.registerViewFactory("in.stage.cityrunner/view", runtime)
     }
 
@@ -95,6 +98,7 @@ class CityRunnerPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallH
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        runtime.onEvent = null
         channel.setMethodCallHandler(null)
         runtime.hostClosed()
         worker.shutdown()

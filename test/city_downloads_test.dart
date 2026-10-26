@@ -198,6 +198,7 @@ void main() {
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     final launches = <Completer<void>>[];
+    final events = <(String, Map<String, dynamic>)>[];
     var backs = 0;
     messenger.setMockMethodCallHandler(SystemChannels.platform_views, (
       call,
@@ -242,7 +243,13 @@ void main() {
 
     await tester.runAsync(() async {
       await tester.pumpWidget(
-        MaterialApp(home: CityRunnerScreen(manifest: manifest, onExit: () {})),
+        MaterialApp(
+          home: CityRunnerScreen(
+            manifest: manifest,
+            onExit: () {},
+            onEvent: (name, properties) => events.add((name, properties)),
+          ),
+        ),
       );
       await waitUntil(() => find.text('rohtak').evaluate().isNotEmpty);
       await tester.tap(find.text('rohtak'));
@@ -256,6 +263,18 @@ void main() {
         await waitUntil(() => launches.length == run + 1);
         await tester.pump();
         expect(find.byType(AndroidView), findsOneWidget);
+        await messenger.handlePlatformMessage(
+          NativeRunner.channel.name,
+          const StandardMethodCodec().encodeMethodCall(
+            const MethodCall('gameEvent', {
+              'name': 'run_started',
+              'course_id': 'rohtak-route',
+            }),
+          ),
+          (_) {},
+        );
+        expect(events.last.$1, 'run_started');
+        expect(events.last.$2, {'course_id': 'rohtak-route'});
         await tester.binding.handlePopRoute();
         await tester.pump();
         expect(backs, run + 1);
@@ -266,6 +285,20 @@ void main() {
       }
       await tester.pumpWidget(const SizedBox.shrink());
     });
+    expect(events.where((event) => event.$1 == 'city_selected'), hasLength(1));
+    expect(
+      events.where((event) => event.$1 == 'download_result'),
+      hasLength(2),
+    );
+    expect(
+      events
+          .where((event) => event.$1 == 'download_requested')
+          .last
+          .$2['cache_hit'],
+      true,
+    );
+    expect(events.where((event) => event.$1 == 'native_closed'), hasLength(2));
+    expect(events.last.$1, 'chooser_closed');
     expect(tester.takeException(), isNull);
   });
 

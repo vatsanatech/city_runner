@@ -26,6 +26,7 @@ import java.lang.ref.WeakReference
 
 internal class CityRunnerRuntime : PlatformViewFactory(StandardMessageCodec.INSTANCE), GodotHost,
     Application.ActivityLifecycleCallbacks {
+    var onEvent: ((String, Map<String, Any>) -> Unit)? = null
     private var host = WeakReference<Activity>(null)
     private var engine: Godot? = null
     private var bridge: CityRunnerHost? = null
@@ -92,6 +93,13 @@ internal class CityRunnerRuntime : PlatformViewFactory(StandardMessageCodec.INST
         }
     }
 
+    fun event(name: String, payload: String) {
+        if (!playing || name !in setOf("native_ready", "run_started", "run_paused", "run_resumed", "run_finished")) return
+        val data = JSONObject(payload)
+        val properties = data.keys().asSequence().associateWith { data.get(it) }
+        onEvent?.invoke(name, properties)
+    }
+
     fun data() = launchData
     fun back() { if (playing) engine?.onBackPressed() }
 
@@ -155,6 +163,7 @@ internal class CityRunnerHost(godot: Godot, private val runtime: CityRunnerRunti
     override fun getPluginName() = "CityRunnerHost"
     override fun getPluginSignals() = setOf(SignalInfo("open_requested"))
     @UsedByGodot fun launchData() = runtime.data()
+    @UsedByGodot fun reportEvent(name: String, payload: String) = runtime.event(name, payload)
     @UsedByGodot fun closeGame() = runtime.finished()
     @UsedByGodot fun failGame(message: String) = runtime.finished(message)
     fun open() = emitSignal("open_requested")
