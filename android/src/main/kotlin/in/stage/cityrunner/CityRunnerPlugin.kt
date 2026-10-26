@@ -71,6 +71,10 @@ class CityRunnerPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallH
                     result.error("launch_failed", "City Runner could not start", null)
                 }
             }
+            "close" -> {
+                runtime.close()
+                result.success(null)
+            }
             "back" -> {
                 runtime.back()
                 result.success(null)

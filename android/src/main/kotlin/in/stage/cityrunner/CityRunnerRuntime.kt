@@ -59,6 +59,10 @@ internal class CityRunnerRuntime : PlatformViewFactory(StandardMessageCodec.INST
         launchData = JSONObject().put("city", city).put("common", common.path)
             .put("packs", JSONArray(packs.map { it.path })).toString()
         pending = result
+        if (layout != null) {
+            resume()
+            bridge?.open()
+        }
     }
 
     override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
@@ -102,6 +106,7 @@ internal class CityRunnerRuntime : PlatformViewFactory(StandardMessageCodec.INST
 
     fun data() = launchData
     fun back() { if (playing) engine?.onBackPressed() }
+    fun close() { if (playing) bridge?.close() }
 
     fun finished(error: String? = null) {
         val activity = host.get() ?: return
@@ -161,10 +166,11 @@ internal class CityRunnerRuntime : PlatformViewFactory(StandardMessageCodec.INST
 
 internal class CityRunnerHost(godot: Godot, private val runtime: CityRunnerRuntime) : GodotPlugin(godot) {
     override fun getPluginName() = "CityRunnerHost"
-    override fun getPluginSignals() = setOf(SignalInfo("open_requested"))
+    override fun getPluginSignals() = setOf(SignalInfo("open_requested"), SignalInfo("close_requested"))
     @UsedByGodot fun launchData() = runtime.data()
     @UsedByGodot fun reportEvent(name: String, payload: String) = runtime.event(name, payload)
     @UsedByGodot fun closeGame() = runtime.finished()
     @UsedByGodot fun failGame(message: String) = runtime.finished(message)
     fun open() = emitSignal("open_requested")
+    fun close() = emitSignal("close_requested")
 }

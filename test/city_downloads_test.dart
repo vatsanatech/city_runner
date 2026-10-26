@@ -200,10 +200,17 @@ void main() {
     final launches = <Completer<void>>[];
     final events = <(String, Map<String, dynamic>)>[];
     var backs = 0;
+    var views = 0;
+    var disposals = 0;
     messenger.setMockMethodCallHandler(SystemChannels.platform_views, (
       call,
     ) async {
-      if (call.method == 'create') return 1;
+      if (call.method == 'create') {
+        expect((call.arguments as Map)['hybrid'], true);
+        views++;
+        return null;
+      }
+      if (call.method == 'dispose') disposals++;
       if (call.method == 'resize') {
         final args = call.arguments as Map;
         return {'width': args['width'], 'height': args['height']};
@@ -244,13 +251,28 @@ void main() {
     await tester.runAsync(() async {
       await tester.pumpWidget(
         MaterialApp(
-          home: CityRunnerScreen(
-            manifest: manifest,
-            onExit: () {},
-            onEvent: (name, properties) => events.add((name, properties)),
+          home: Builder(
+            builder:
+                (context) => TextButton(
+                  onPressed:
+                      () => Navigator.of(context).push<void>(
+                        MaterialPageRoute<void>(
+                          builder:
+                              (routeContext) => CityRunnerScreen(
+                                manifest: manifest,
+                                onExit: () => Navigator.of(routeContext).pop(),
+                                onEvent:
+                                    (name, properties) =>
+                                        events.add((name, properties)),
+                              ),
+                        ),
+                      ),
+                  child: const Text('Open game'),
+                ),
           ),
         ),
       );
+      await tester.tap(find.text('Open game'));
       await waitUntil(() => find.text('rohtak').evaluate().isNotEmpty);
       await tester.tap(find.text('rohtak'));
       await waitUntil(
@@ -262,7 +284,7 @@ void main() {
         await tester.tap(find.text(run == 0 ? 'Download & play' : 'Play city'));
         await waitUntil(() => launches.length == run + 1);
         await tester.pump();
-        expect(find.byType(AndroidView), findsOneWidget);
+        expect(find.byType(PlatformViewLink), findsOneWidget);
         await messenger.handlePlatformMessage(
           NativeRunner.channel.name,
           const StandardMethodCodec().encodeMethodCall(
@@ -278,17 +300,34 @@ void main() {
         await tester.binding.handlePopRoute();
         await tester.pump();
         expect(backs, run + 1);
-        expect(find.byType(AndroidView), findsOneWidget);
+        expect(find.byType(PlatformViewLink), findsOneWidget);
         launches[run].complete();
         await waitUntil(() => find.text('Play city').evaluate().isNotEmpty);
-        expect(find.byType(AndroidView), findsNothing);
+        expect(find.byType(PlatformViewLink), findsNothing);
       }
+      await tester.tap(find.byIcon(Icons.arrow_back));
+      await tester.pumpAndSettle();
+      expect(find.text('Open game'), findsOneWidget);
+      expect(views, 1);
+      expect(disposals, 0);
+      await tester.tap(find.text('Open game'));
+      await waitUntil(() => find.text('rohtak').evaluate().isNotEmpty);
+      await tester.tap(find.text('rohtak'));
+      await waitUntil(() => find.text('Play city').evaluate().isNotEmpty);
+      await tester.tap(find.text('Play city'));
+      await waitUntil(() => launches.length == 3);
+      expect(views, 1);
+      expect(disposals, 0);
+      launches.last.complete();
+      await waitUntil(() => find.text('Play city').evaluate().isNotEmpty);
+      await tester.tap(find.byIcon(Icons.arrow_back));
+      await tester.pumpAndSettle();
       await tester.pumpWidget(const SizedBox.shrink());
     });
-    expect(events.where((event) => event.$1 == 'city_selected'), hasLength(1));
+    expect(events.where((event) => event.$1 == 'city_selected'), hasLength(2));
     expect(
       events.where((event) => event.$1 == 'download_result'),
-      hasLength(2),
+      hasLength(3),
     );
     expect(
       events
@@ -297,7 +336,7 @@ void main() {
           .$2['cache_hit'],
       true,
     );
-    expect(events.where((event) => event.$1 == 'native_closed'), hasLength(2));
+    expect(events.where((event) => event.$1 == 'native_closed'), hasLength(3));
     expect(events.last.$1, 'chooser_closed');
     expect(tester.takeException(), isNull);
   });

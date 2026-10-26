@@ -1,4 +1,7 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import 'city_downloads.dart';
@@ -11,6 +14,58 @@ abstract class RunnerTheme {
   static const honey = Color(0xffffc85c);
   static const muted = Color(0xffe7d6d0);
   static const inset = 16.0;
+}
+
+// Godot destroys its engine when its SurfaceView detaches from the window.
+// Keep one hybrid-composition view attached to the root overlay between visits.
+class _RunnerOverlay {
+  static OverlayEntry? _entry;
+  static OverlayState? _owner;
+  static bool _visible = false;
+
+  static void show(BuildContext context) {
+    _visible = true;
+    final owner = Overlay.of(context, rootOverlay: true);
+    if (_owner != owner) {
+      _owner = owner;
+      _entry = OverlayEntry(
+        builder:
+            (_) => Offstage(
+              offstage: !_visible,
+              child: PlatformViewLink(
+                viewType: 'in.stage.cityrunner/view',
+                surfaceFactory:
+                    (_, controller) => AndroidViewSurface(
+                      controller: controller as AndroidViewController,
+                      gestureRecognizers:
+                          const <Factory<OneSequenceGestureRecognizer>>{},
+                      hitTestBehavior: PlatformViewHitTestBehavior.opaque,
+                    ),
+                onCreatePlatformView:
+                    (params) =>
+                        PlatformViewsService.initExpensiveAndroidView(
+                            id: params.id,
+                            viewType: 'in.stage.cityrunner/view',
+                            layoutDirection: TextDirection.ltr,
+                            onFocus: () => params.onFocusChanged(true),
+                          )
+                          ..addOnPlatformViewCreatedListener(
+                            params.onPlatformViewCreated,
+                          )
+                          ..create(),
+              ),
+            ),
+      );
+      owner.insert(_entry!);
+    } else {
+      _entry!.markNeedsBuild();
+    }
+  }
+
+  static void hide() {
+    _visible = false;
+    _entry?.markNeedsBuild();
+  }
 }
 
 class CityRunnerScreen extends StatefulWidget {
@@ -172,9 +227,11 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
         return;
       }
       setState(() => _playing = true);
+      _RunnerOverlay.show(context);
       try {
         await _native.launch(city.id, files);
       } finally {
+        _RunnerOverlay.hide();
         if (mounted) setState(() => _playing = false);
         await widget.afterNativeExit?.call();
       }
@@ -246,6 +303,7 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    if (_playing) _native.close();
     NativeRunner.channel.setMethodCallHandler(null);
     _event('chooser_closed');
     _cancelRequested = true;
@@ -261,9 +319,7 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
         onPopInvokedWithResult: (popped, result) {
           if (!popped) _native.back();
         },
-        child: const Scaffold(
-          body: AndroidView(viewType: 'in.stage.cityrunner/view'),
-        ),
+        child: const ColoredBox(color: RunnerTheme.background),
       );
     }
     final cities =

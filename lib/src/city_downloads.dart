@@ -19,6 +19,7 @@ class NativeRunner {
       false;
 
   Future<void> back() => channel.invokeMethod<void>('back');
+  Future<void> close() => channel.invokeMethod<void>('close');
 
   Future<void> launch(String city, List<File> files) =>
       channel.invokeMethod<void>('launch', {

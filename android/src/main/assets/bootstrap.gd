@@ -11,6 +11,7 @@ func _ready() -> void:
 	if Engine.has_singleton("CityRunnerHost"):
 		_bridge = Engine.get_singleton("CityRunnerHost")
 		_bridge.connect("open_requested", _open_game)
+		_bridge.connect("close_requested", close_game)
 		_open_game()
 		return
 	var common := ""
