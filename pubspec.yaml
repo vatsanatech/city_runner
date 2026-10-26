@@ -1,0 +1,18 @@
+name: city_runner
+description: Native Godot City Runner with selected-city downloads for STAGE.
+version: 0.1.0
+publish_to: none
+environment:
+  sdk: '>=3.7.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: in.stage.cityrunner
+        pluginClass: CityRunnerPlugin

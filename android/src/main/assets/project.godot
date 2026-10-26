@@ -1,0 +1,18 @@
+config_version=5
+
+[application]
+config/name="City Runner"
+config/use_hidden_project_data_directory=false
+run/main_scene="res://bootstrap.tscn"
+config/features=PackedStringArray("4.6", "GL Compatibility")
+
+[display]
+window/size/viewport_width=720
+window/size/viewport_height=1280
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation=1
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
