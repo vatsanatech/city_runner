@@ -20,6 +20,18 @@ class NativeRunner {
 
   Future<void> back() => channel.invokeMethod<void>('back');
   Future<void> close() => channel.invokeMethod<void>('close');
+  Future<bool> engineInstalled() async =>
+      await channel.invokeMethod<bool>('engineInstalled') ?? false;
+  Future<void> installEngine() async {
+    try {
+      await channel.invokeMethod<void>('installEngine');
+    } on PlatformException catch (error) {
+      if (error.code == 'cancelled') throw DownloadCancelled();
+      rethrow;
+    }
+  }
+
+  Future<void> cancelEngine() => channel.invokeMethod<void>('cancelEngine');
 
   Future<void> launch(String city, List<File> files) =>
       channel.invokeMethod<void>('launch', {
@@ -52,10 +64,9 @@ class RunnerCity {
       name = json['name'] as String,
       localName = json['nameLocal'] as String,
       state = json['state'] as String,
-      files =
-          (json['files'] as List)
-              .map((item) => PackFile(item as Map<String, dynamic>, manifest))
-              .toList();
+      files = (json['files'] as List)
+          .map((item) => PackFile(item as Map<String, dynamic>, manifest))
+          .toList();
 
   final String id, name, localName, state;
   final List<PackFile> files;
@@ -110,18 +121,16 @@ class CityDownloads {
         'This catalogue does not match the native engine',
       );
     }
-    final parsed =
-        (json['cities'] as List)
-            .map((item) => RunnerCity(item as Map<String, dynamic>, uri))
-            .toList();
+    final parsed = (json['cities'] as List)
+        .map((item) => RunnerCity(item as Map<String, dynamic>, uri))
+        .toList();
     if (parsed.any((city) => !playable.contains(city.id)) ||
         parsed.map((city) => city.id).toSet().length != parsed.length) {
       throw const FormatException('Catalogue contains an unavailable city');
     }
-    common =
-        (json['common'] as List)
-            .map((item) => PackFile(item as Map<String, dynamic>, uri))
-            .toList();
+    common = (json['common'] as List)
+        .map((item) => PackFile(item as Map<String, dynamic>, uri))
+        .toList();
     if (common.length != 1) {
       throw const FormatException('One native common pack is required');
     }
@@ -242,11 +251,10 @@ class CityDownloads {
       }
     }
     if (generation != _generation) throw DownloadCancelled();
-    final valid =
-        {
-          ...common,
-          ...cities.expand((city) => city.files),
-        }.map((pack) => fileFor(pack).path).toSet();
+    final valid = {
+      ...common,
+      ...cities.expand((city) => city.files),
+    }.map((pack) => fileFor(pack).path).toSet();
     await for (final entity in root.list()) {
       if (entity is File &&
           entity.path.endsWith('.pck') &&
@@ -266,13 +274,12 @@ class CityDownloads {
   }
 
   Future<void> remove(RunnerCity city) async {
-    final keep =
-        {
-          ...common,
-          ...cities
-              .where((other) => other.id != city.id)
-              .expand((other) => other.files),
-        }.map((pack) => pack.sha256).toSet();
+    final keep = {
+      ...common,
+      ...cities
+          .where((other) => other.id != city.id)
+          .expand((other) => other.files),
+    }.map((pack) => pack.sha256).toSet();
     for (final pack in city.files) {
       final file = fileFor(pack);
       if (!keep.contains(pack.sha256) && await file.exists()) {
