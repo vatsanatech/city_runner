@@ -1,0 +1,12 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:dist="http://schemas.android.com/apk/distribution"
+    xmlns:tools="http://schemas.android.com/tools">
+    <dist:module dist:instant="false" dist:title="@string/city_runner_engine_name">
+        <dist:delivery><dist:on-demand /></dist:delivery>
+        <dist:fusing dist:include="false" />
+    </dist:module>
+    <application>
+        <provider android:name="androidx.core.content.FileProvider"
+            tools:node="remove" tools:selector="org.godotengine.godot" />
+    </application>
+</manifest>
