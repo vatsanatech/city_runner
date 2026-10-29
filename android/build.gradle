@@ -16,5 +16,5 @@ android {
     kotlinOptions { jvmTarget = '17' }
 }
 dependencies {
-    implementation 'org.godotengine:godot:4.6.0.stable'
+    implementation 'com.google.android.play:feature-delivery:2.1.0'
 }

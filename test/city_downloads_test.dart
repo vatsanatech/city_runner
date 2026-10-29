@@ -219,6 +219,8 @@ void main() {
     });
     messenger.setMockMethodCallHandler(NativeRunner.channel, (call) async {
       switch (call.method) {
+        case 'engineInstalled':
+          return true;
         case 'cacheRoot':
           return directory.path;
         case 'verify':
@@ -341,6 +343,181 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  for (final action in [
+    'failure',
+    'cancel',
+    'background',
+    'unmount',
+    'success',
+  ]) {
+    testWidgets(
+      '$action during engine download keeps city downloads selective',
+      (tester) async {
+        final messenger =
+            TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+        var engine = Completer<void>();
+        var installed = false;
+        var installs = 0;
+        var handoffCount = 0;
+        final handoffs = <Completer<void>>[];
+        final events = <(String, Map<String, dynamic>)>[];
+        messenger.setMockMethodCallHandler(NativeRunner.channel, (call) async {
+          switch (call.method) {
+            case 'cacheRoot':
+              return directory.path;
+            case 'engineInstalled':
+              return installed;
+            case 'installEngine':
+              installs++;
+              await engine.future;
+              installed = true;
+              return null;
+            case 'cancelEngine':
+              if (!engine.isCompleted) {
+                engine.completeError(PlatformException(code: 'cancelled'));
+              }
+              return null;
+            case 'verify':
+              final args = call.arguments as Map;
+              return await File(args['path'] as String).readAsString() ==
+                  payloads[args['sha256']];
+          }
+          throw StateError('Unexpected native method: ${call.method}');
+        });
+        addTearDown(() {
+          messenger.setMockMethodCallHandler(NativeRunner.channel, null);
+        });
+        Future<void> waitUntil(bool Function() ready) async {
+          for (var attempt = 0; attempt < 200 && !ready(); attempt++) {
+            await Future<void>.delayed(const Duration(milliseconds: 10));
+            await tester.pump();
+          }
+          expect(ready(), isTrue);
+        }
+
+        await tester.runAsync(() async {
+          await tester.pumpWidget(
+            MaterialApp(
+              home: CityRunnerScreen(
+                manifest: manifest,
+                onExit: () {},
+                onEvent: (name, data) => events.add((name, data)),
+                beforeNativeLaunch: () {
+                  handoffCount++;
+                  final handoff = Completer<void>();
+                  handoffs.add(handoff);
+                  return handoff.future;
+                },
+              ),
+            ),
+          );
+          await waitUntil(() => find.text('rohtak').evaluate().isNotEmpty);
+          expect(installs, 0);
+          await tester.tap(find.text('rohtak'));
+          await waitUntil(
+            () => tester
+                .widgetList<FilledButton>(find.byType(FilledButton))
+                .any((button) => button.onPressed != null),
+          );
+          expect(installs, 0);
+          requests.clear();
+          await tester.tap(find.text('Download & play'));
+          await waitUntil(() => installs == 1);
+          expect(requests, isEmpty);
+          await messenger.handlePlatformMessage(
+            NativeRunner.channel.name,
+            const StandardMethodCodec().encodeMethodCall(
+              const MethodCall('engineProgress', {
+                'received': 1048576,
+                'total': 2097152,
+              }),
+            ),
+            (_) {},
+          );
+          await tester.pump();
+          expect(find.text('Engine: 1.00 / 2.00 MiB'), findsOneWidget);
+
+          if (action == 'failure') {
+            engine.completeError(
+              PlatformException(
+                code: 'engine_unavailable',
+                message: 'Please retry Google Play',
+              ),
+            );
+            await waitUntil(() => find.text('Retry').evaluate().isNotEmpty);
+            expect(requests, isEmpty);
+            expect(find.text('Please retry Google Play'), findsOneWidget);
+            engine = Completer<void>();
+            await tester.tap(find.text('Retry'));
+            await waitUntil(() => installs == 2);
+            engine.complete();
+          } else if (action == 'cancel') {
+            await tester.tap(find.text('Cancel'));
+          } else if (action == 'background') {
+            tester.binding.handleAppLifecycleStateChanged(
+              AppLifecycleState.inactive,
+            );
+            tester.binding.handleAppLifecycleStateChanged(
+              AppLifecycleState.hidden,
+            );
+            tester.binding.handleAppLifecycleStateChanged(
+              AppLifecycleState.paused,
+            );
+          } else if (action == 'unmount') {
+            await tester.pumpWidget(const SizedBox.shrink());
+          } else {
+            engine.complete();
+          }
+
+          if (action == 'success' || action == 'failure') {
+            await waitUntil(() => handoffCount == 1);
+            expect(requests, ['/common.pck', '/rohtak.pck']);
+            await tester.tap(find.text('Cancel'));
+            handoffs.last.complete();
+            await waitUntil(() => find.text('Cancel').evaluate().isEmpty);
+            await tester.tap(find.text('hisar'));
+            await waitUntil(
+              () => tester
+                  .widgetList<FilledButton>(find.byType(FilledButton))
+                  .any((button) => button.onPressed != null),
+            );
+            requests.clear();
+            await tester.tap(find.text('Download & play'));
+            await waitUntil(() => handoffCount == 2);
+            expect(installs, action == 'failure' ? 2 : 1);
+            expect(requests, ['/hisar.pck']);
+            await tester.tap(find.text('Cancel'));
+            handoffs.last.complete();
+            await waitUntil(() => find.text('Cancel').evaluate().isEmpty);
+          } else {
+            await waitUntil(
+              () => events.any(
+                (event) =>
+                    event.$1 == 'download_result' &&
+                    event.$2['result_state'] == 'cancelled',
+              ),
+            );
+            expect(requests, isEmpty);
+            expect(handoffCount, 0);
+          }
+          if (action == 'background') {
+            tester.binding.handleAppLifecycleStateChanged(
+              AppLifecycleState.hidden,
+            );
+            tester.binding.handleAppLifecycleStateChanged(
+              AppLifecycleState.inactive,
+            );
+          }
+          tester.binding.handleAppLifecycleStateChanged(
+            AppLifecycleState.resumed,
+          );
+          await tester.pumpWidget(const SizedBox.shrink());
+        });
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   for (final action in ['cancel', 'background', 'unmount']) {
     testWidgets('$action during audio handoff prevents native launch', (
       tester,
@@ -352,6 +529,8 @@ void main() {
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       messenger.setMockMethodCallHandler(NativeRunner.channel, (call) async {
         switch (call.method) {
+          case 'engineInstalled':
+            return true;
           case 'cacheRoot':
             return directory.path;
           case 'verify':

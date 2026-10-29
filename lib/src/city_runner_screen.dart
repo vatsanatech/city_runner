@@ -29,32 +29,29 @@ class _RunnerOverlay {
     if (_owner != owner) {
       _owner = owner;
       _entry = OverlayEntry(
-        builder:
-            (_) => Offstage(
-              offstage: !_visible,
-              child: PlatformViewLink(
-                viewType: 'in.stage.cityrunner/view',
-                surfaceFactory:
-                    (_, controller) => AndroidViewSurface(
-                      controller: controller as AndroidViewController,
-                      gestureRecognizers:
-                          const <Factory<OneSequenceGestureRecognizer>>{},
-                      hitTestBehavior: PlatformViewHitTestBehavior.opaque,
-                    ),
-                onCreatePlatformView:
-                    (params) =>
-                        PlatformViewsService.initExpensiveAndroidView(
-                            id: params.id,
-                            viewType: 'in.stage.cityrunner/view',
-                            layoutDirection: TextDirection.ltr,
-                            onFocus: () => params.onFocusChanged(true),
-                          )
-                          ..addOnPlatformViewCreatedListener(
-                            params.onPlatformViewCreated,
-                          )
-                          ..create(),
-              ),
+        builder: (_) => Offstage(
+          offstage: !_visible,
+          child: PlatformViewLink(
+            viewType: 'in.stage.cityrunner/view',
+            surfaceFactory: (_, controller) => AndroidViewSurface(
+              controller: controller as AndroidViewController,
+              gestureRecognizers:
+                  const <Factory<OneSequenceGestureRecognizer>>{},
+              hitTestBehavior: PlatformViewHitTestBehavior.opaque,
             ),
+            onCreatePlatformView: (params) =>
+                PlatformViewsService.initExpensiveAndroidView(
+                    id: params.id,
+                    viewType: 'in.stage.cityrunner/view',
+                    layoutDirection: TextDirection.ltr,
+                    onFocus: () => params.onFocusChanged(true),
+                  )
+                  ..addOnPlatformViewCreatedListener(
+                    params.onPlatformViewCreated,
+                  )
+                  ..create(),
+          ),
+        ),
       );
       owner.insert(_entry!);
     } else {
@@ -96,6 +93,8 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
   String? _error;
   bool _loading = true, _working = false, _playing = false;
   bool _cancelRequested = false;
+  bool _engineInstalled = false, _installingEngine = false;
+  int _engineReceived = 0, _engineTotal = 0;
   double _progress = 0;
   int? _bytes;
 
@@ -104,6 +103,13 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     NativeRunner.channel.setMethodCallHandler((call) async {
+      if (call.method == 'engineProgress' && _installingEngine && mounted) {
+        final progress = Map<String, dynamic>.from(call.arguments as Map);
+        setState(() {
+          _engineReceived = progress['received'] as int;
+          _engineTotal = progress['total'] as int;
+        });
+      }
       if (call.method == 'gameEvent' && _playing && mounted) {
         final event = Map<String, dynamic>.from(call.arguments as Map);
         _event(event.remove('name') as String, event);
@@ -136,6 +142,7 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
     try {
       final store = CityDownloads(await _native.cacheRoot(), _native.verify);
       try {
+        _engineInstalled = await _native.engineInstalled();
         await store.load(widget.manifest);
       } catch (_) {
         store.dispose();
@@ -208,6 +215,17 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
     var launching = false;
     _event('download_requested', download);
     try {
+      if (!_engineInstalled) {
+        setState(() {
+          _installingEngine = true;
+          _engineReceived = 0;
+          _engineTotal = 0;
+        });
+        await _native.installEngine();
+        _engineInstalled = true;
+        if (mounted) setState(() => _installingEngine = false);
+      }
+      if (!mounted || _cancelRequested) throw DownloadCancelled();
       final files = await _downloads!.install(city, (received, total) {
         if (mounted) setState(() => _progress = received / total);
       });
@@ -256,9 +274,20 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
       } else if (launching) {
         _event('native_error', {'error_code': _code(error)});
       }
-      if (mounted) setState(() => _error = '$error');
+      if (mounted) {
+        setState(
+          () => _error = error is PlatformException
+              ? error.message ?? 'City Runner could not download. Please retry.'
+              : '$error',
+        );
+      }
     } finally {
-      if (mounted) setState(() => _working = false);
+      if (mounted) {
+        setState(() {
+          _working = false;
+          _installingEngine = false;
+        });
+      }
     }
   }
 
@@ -297,6 +326,7 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
 
   void _cancel() {
     _cancelRequested = true;
+    if (_installingEngine) _native.cancelEngine();
     _downloads?.cancel();
   }
 
@@ -306,7 +336,7 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
     if (_playing) _native.close();
     NativeRunner.channel.setMethodCallHandler(null);
     _event('chooser_closed');
-    _cancelRequested = true;
+    _cancel();
     _downloads?.dispose();
     super.dispose();
   }
@@ -322,14 +352,13 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
         child: const ColoredBox(color: RunnerTheme.background),
       );
     }
-    final cities =
-        (_downloads?.cities ?? [])
-            .where(
-              (city) => '${city.name} ${city.localName} ${city.state}'
-                  .toLowerCase()
-                  .contains(_query.toLowerCase()),
-            )
-            .toList();
+    final cities = (_downloads?.cities ?? [])
+        .where(
+          (city) => '${city.name} ${city.localName} ${city.state}'
+              .toLowerCase()
+              .contains(_query.toLowerCase()),
+        )
+        .toList();
     return PopScope(
       canPop: !_working,
       onPopInvokedWithResult: (popped, result) {
@@ -378,10 +407,9 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
                         selectedTileColor: RunnerTheme.surface,
                         title: Text(city.name),
                         subtitle: Text('${city.localName} · ${city.state}'),
-                        trailing:
-                            city == _selected
-                                ? const Icon(Icons.check_circle)
-                                : null,
+                        trailing: city == _selected
+                            ? const Icon(Icons.check_circle)
+                            : null,
                         onTap: _working ? null : () => _select(city),
                       );
                     },
@@ -393,30 +421,53 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
                     style: const TextStyle(color: RunnerTheme.cream),
                   ),
                   TextButton(
-                    onPressed:
-                        _working ? null : (_downloads == null ? _load : _play),
+                    onPressed: _working
+                        ? null
+                        : (_downloads == null ? _load : _play),
                     child: const Text('Retry'),
                   ),
                 ],
                 if (_selected != null) ...[
+                  if (!_engineInstalled)
+                    const Text(
+                      'First play also downloads the game engine from Google Play. '
+                      'Its download size appears below when available. '
+                      'The engine stays installed for other cities.',
+                    ),
                   Text(
                     _bytes == null
                         ? 'Checking saved files…'
                         : _bytes == 0
                         ? 'Saved on this device. Verified before play.'
                         : 'Download up to ${(_bytes! / 1048576).toStringAsFixed(2)} MiB '
-                            '(city + any missing shared resources).',
+                              '(city + any missing shared resources).',
                   ),
                   const SizedBox(height: 8),
                   if (_working && !_playing) ...[
-                    LinearProgressIndicator(value: _progress),
-                    Text('${(_progress * 100).toStringAsFixed(0)}%'),
+                    if (_installingEngine) ...[
+                      LinearProgressIndicator(
+                        value: _engineTotal > 0
+                            ? _engineReceived / _engineTotal
+                            : null,
+                      ),
+                      Text(
+                        _engineTotal > 0
+                            ? 'Engine: ${(_engineReceived / 1048576).toStringAsFixed(2)} / '
+                                  '${(_engineTotal / 1048576).toStringAsFixed(2)} MiB'
+                            : 'Preparing engine download with Google Play…',
+                      ),
+                    ] else ...[
+                      LinearProgressIndicator(value: _progress),
+                      Text('City: ${(_progress * 100).toStringAsFixed(0)}%'),
+                    ],
                     TextButton(onPressed: _cancel, child: const Text('Cancel')),
                   ] else ...[
                     FilledButton(
                       onPressed: _working || _bytes == null ? null : _play,
                       child: Text(
-                        _bytes == 0 ? 'Play city' : 'Download & play',
+                        _bytes == 0 && _engineInstalled
+                            ? 'Play city'
+                            : 'Download & play',
                       ),
                     ),
                     TextButton(

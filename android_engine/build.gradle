@@ -1,0 +1,30 @@
+apply plugin: 'com.android.dynamic-feature'
+apply plugin: 'kotlin-android'
+
+def host = project(':app').android
+android {
+    namespace 'in.stage.cityrunner.engine'
+    compileSdk host.compileSdk
+    defaultConfig {
+        minSdk host.defaultConfig.minSdk
+        targetSdk host.defaultConfig.targetSdk
+    }
+    flavorDimensions 'app'
+    host.productFlavors.each { flavor ->
+        productFlavors.create(flavor.name) { dimension 'app' }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+    buildTypes {
+        release { proguardFiles 'proguard-rules.pro' }
+    }
+}
+
+dependencies {
+    implementation project(':app')
+    implementation project(':city_runner')
+    implementation 'org.godotengine:godot:4.6.0.stable'
+}
