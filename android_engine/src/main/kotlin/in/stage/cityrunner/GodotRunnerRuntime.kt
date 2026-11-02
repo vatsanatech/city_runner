@@ -66,6 +66,8 @@ class GodotRunnerRuntime : CityRunnerRuntime(), GodotHost,
 
     override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
         val activity = host.get() ?: error("The game host is not available")
+        // SplitCompat needs transitive JNI dependencies loaded before the engine.
+        System.loadLibrary("c++_shared")
         val godot = engine ?: Godot.getInstance(context.applicationContext).also { engine = it }
         val reopening = bridge != null
         if (!reopening) {
