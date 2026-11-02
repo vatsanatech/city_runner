@@ -7,6 +7,6 @@
     </dist:module>
     <application>
         <provider android:name="androidx.core.content.FileProvider"
-            tools:node="remove" tools:selector="org.godotengine.godot" />
+            tools:node="remove" />
     </application>
 </manifest>

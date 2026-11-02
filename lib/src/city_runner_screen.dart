@@ -128,6 +128,7 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
 
   String _code(Object error) => switch (error) {
     DownloadCancelled() => 'cancelled',
+    PlatformException(code: 'engine_unavailable') => 'unavailable',
     PlatformException() => 'native_error',
     FormatException() => 'invalid_content',
     _ => 'unavailable',
@@ -270,6 +271,9 @@ class _CityRunnerScreenState extends State<CityRunnerScreen>
           'result_state': 'failure',
           'duration_ms': clock.elapsedMilliseconds,
           'error_code': _code(error),
+          'play_error_code': error is PlatformException && error.details is Map
+              ? (error.details as Map)['play_error_code']
+              : null,
         });
       } else if (launching) {
         _event('native_error', {'error_code': _code(error)});

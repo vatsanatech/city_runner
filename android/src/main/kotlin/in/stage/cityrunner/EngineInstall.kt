@@ -5,6 +5,7 @@ import android.content.Context
 import com.google.android.play.core.splitcompat.SplitCompat
 import com.google.android.play.core.splitinstall.SplitInstallManagerFactory
 import com.google.android.play.core.splitinstall.SplitInstallRequest
+import com.google.android.play.core.splitinstall.SplitInstallException
 import com.google.android.play.core.splitinstall.SplitInstallSessionState
 import com.google.android.play.core.splitinstall.SplitInstallStateUpdatedListener
 import com.google.android.play.core.splitinstall.model.SplitInstallSessionStatus
@@ -26,7 +27,8 @@ internal class EngineInstall(
     private val listener = SplitInstallStateUpdatedListener { state ->
         if (pending != null && state.status() == SplitInstallSessionStatus.FAILED &&
             state.errorCode() == SplitInstallErrorCode.SERVICE_DIED) {
-            finish("engine_unavailable", "Google Play disconnected. Please retry the engine download.")
+            finish("engine_unavailable", "Google Play disconnected. Please retry the engine download.",
+                state.errorCode())
         } else if (pending != null && state.sessionId() == session && MODULE in state.moduleNames()) {
             receivedUpdate = true
             update(state)
@@ -65,16 +67,18 @@ internal class EngineInstall(
                     session = id
                     manager.getSessionState(id).addOnSuccessListener { state ->
                         if (current == attempt && pending != null && !receivedUpdate) update(state)
-                    }.addOnFailureListener {
+                    }.addOnFailureListener { error ->
                         if (current == attempt) finish("engine_unavailable",
-                            "The game engine installation could not be checked. Please retry.")
+                            "The game engine installation could not be checked. Please retry.",
+                            (error as? SplitInstallException)?.errorCode)
                     }
                 }
             }
-            .addOnFailureListener {
+            .addOnFailureListener { error ->
                 if (current == attempt) finish("engine_unavailable",
                     "The game engine could not download from Google Play. Check your connection and retry. " +
-                        "Install STAGE from Google Play to use on-demand games.")
+                        "Install STAGE from Google Play to use on-demand games.",
+                    (error as? SplitInstallException)?.errorCode)
             }
     }
 
@@ -93,7 +97,8 @@ internal class EngineInstall(
                 finish()
             }
             SplitInstallSessionStatus.FAILED -> finish("engine_unavailable",
-                "The game engine download failed (${state.errorCode()}). Check Google Play and retry.")
+                "The game engine download failed (${state.errorCode()}). Check Google Play and retry.",
+                state.errorCode())
             SplitInstallSessionStatus.CANCELED -> finish("cancelled", "Download cancelled")
             else -> Unit
         }
@@ -124,7 +129,7 @@ internal class EngineInstall(
         finish("cancelled", "Download cancelled")
     }
 
-    private fun finish(code: String? = null, message: String? = null) {
+    private fun finish(code: String? = null, message: String? = null, playError: Int? = null) {
         val result = pending ?: return
         pending = null
         attempt++
@@ -132,7 +137,8 @@ internal class EngineInstall(
         confirmation = null
         confirming = false
         manager.unregisterListener(listener)
-        if (code == null) result.success(null) else result.error(code, message, null)
+        if (code == null) result.success(null) else result.error(code, message,
+            playError?.let { mapOf("play_error_code" to it) })
     }
 
     companion object {

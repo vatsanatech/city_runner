@@ -442,11 +442,16 @@ void main() {
               PlatformException(
                 code: 'engine_unavailable',
                 message: 'Please retry Google Play',
+                details: {'play_error_code': -100},
               ),
             );
             await waitUntil(() => find.text('Retry').evaluate().isNotEmpty);
             expect(requests, isEmpty);
             expect(find.text('Please retry Google Play'), findsOneWidget);
+            final failure =
+                events.lastWhere((event) => event.$1 == 'download_result').$2;
+            expect(failure['error_code'], 'unavailable');
+            expect(failure['play_error_code'], -100);
             engine = Completer<void>();
             await tester.tap(find.text('Retry'));
             await waitUntil(() => installs == 2);
